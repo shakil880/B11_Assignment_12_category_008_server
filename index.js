@@ -10,14 +10,25 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors({
   origin: [
+    'http://localhost:5173',
+    'http://localhost:5174', 
+    'http://localhost:5175',
+    'http://localhost:3000',
     process.env.FRONTEND_URL_1,
-    process.env.FRONTEND_URL_2,
+    process.env.FRONTEND_URL_2, 
     process.env.FRONTEND_URL_3,
     process.env.FRONTEND_PROD_URL
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+
+// Helper function to validate ObjectId
+const isValidObjectId = (id) => {
+  return ObjectId.isValid(id) && (String(new ObjectId(id)) === id);
+};
 
 // MongoDB connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@${process.env.DB_CLUSTER}/${process.env.DB_NAME}?retryWrites=true&w=majority`;
@@ -46,6 +57,31 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+// Role verification middleware
+const verifyAgent = async (req, res, next) => {
+  try {
+    const userEmail = req.decoded.email;
+    const user = await usersCollection.findOne({ email: userEmail });
+    
+    if (!user) {
+      return res.status(404).send({ error: true, message: 'User not found' });
+    }
+    
+    if (user.role !== 'agent' && user.role !== 'admin') {
+      return res.status(403).send({ 
+        error: true, 
+        message: 'Access denied. Only agents can add properties.' 
+      });
+    }
+    
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Error verifying agent role:', error);
+    res.status(500).send({ error: true, message: 'Internal server error' });
+  }
+};
+
 async function run() {
   try {
     await client.connect();
@@ -60,61 +96,541 @@ async function run() {
 
     // Welcome Route & API Documentation
     app.get('/', (req, res) => {
+      const html = `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Real Estate Platform API Documentation</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background: #f8f9fa; }
+            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; text-align: center; }
+            .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
+            .header p { font-size: 1.2rem; opacity: 0.9; }
+            .live-link { background: #28a745; color: white; padding: 15px 30px; border: none; border-radius: 5px; font-size: 1.1rem; text-decoration: none; display: inline-block; margin: 20px 10px; transition: background 0.3s; }
+            .live-link:hover { background: #218838; }
+            .status { display: flex; justify-content: space-around; margin-bottom: 30px; }
+            .status-card { background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .status-card h3 { color: #28a745; margin-bottom: 10px; }
+            .api-section { background: white; margin-bottom: 30px; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .api-header { background: #6c757d; color: white; padding: 20px; font-size: 1.3rem; font-weight: bold; }
+            .api-content { padding: 20px; }
+            .endpoint { margin-bottom: 20px; padding: 15px; border-left: 4px solid #007bff; background: #f8f9fa; }
+            .method { font-weight: bold; color: white; padding: 5px 10px; border-radius: 3px; margin-right: 10px; }
+            .get { background: #28a745; }
+            .post { background: #007bff; }
+            .put { background: #ffc107; color: #333; }
+            .patch { background: #17a2b8; }
+            .delete { background: #dc3545; }
+            .endpoint-url { font-family: 'Courier New', monospace; font-weight: bold; margin: 5px 0; }
+            .endpoint-desc { color: #666; margin: 5px 0; }
+            .params { background: #e9ecef; padding: 10px; border-radius: 5px; margin: 10px 0; }
+            .footer { text-align: center; padding: 30px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🏠 Real Estate Platform API</h1>
+              <p>Comprehensive RESTful API for Property Management System</p>
+              <p><strong>Version:</strong> 1.0.0 | <strong>Status:</strong> ✅ Running</p>
+              <div>
+                <a href="https://b11a12elite.netlify.app" class="live-link" target="_blank">🌐 Live Frontend</a>
+                <a href="/api" class="live-link" target="_blank">📋 JSON API Docs</a>
+              </div>
+            </div>
+
+            <div class="status">
+              <div class="status-card">
+                <h3>✅ Server Status</h3>
+                <p>Running on Port ${port}</p>
+              </div>
+              <div class="status-card">
+                <h3>✅ Database</h3>
+                <p>MongoDB Connected</p>
+              </div>
+              <div class="status-card">
+                <h3>✅ CORS</h3>
+                <p>Frontend Enabled</p>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">🔐 Authentication Endpoints</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/jwt</div>
+                  <div class="endpoint-desc">Generate JWT token for user authentication</div>
+                  <div class="params"><strong>Body:</strong> { user: Object } - User data from Firebase</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">👥 User Management</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/users</div>
+                  <div class="endpoint-desc">Get all users (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/users</div>
+                  <div class="endpoint-desc">Create or update user profile</div>
+                  <div class="params"><strong>Body:</strong> { uid, email, name, photoURL, role }</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/users/:email</div>
+                  <div class="endpoint-desc">Get user details by email</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/users/admin/:id</div>
+                  <div class="endpoint-desc">Make user admin (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/users/agent/:id</div>
+                  <div class="endpoint-desc">Make user agent (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/users/fraud/:id</div>
+                  <div class="endpoint-desc">Mark user as fraud (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method delete">DELETE</span>
+                  <div class="endpoint-url">/users/:id</div>
+                  <div class="endpoint-desc">Delete user (Admin only)</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">🏠 Property Management</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/properties</div>
+                  <div class="endpoint-desc">Get all verified properties with filters</div>
+                  <div class="params"><strong>Query:</strong> search, sort, minPrice, maxPrice, page, limit</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/properties/:id</div>
+                  <div class="endpoint-desc">Get property details by ID</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/properties/agent/:email</div>
+                  <div class="endpoint-desc">Get properties by agent email</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/advertised-properties</div>
+                  <div class="endpoint-desc">Get featured/advertised properties (limit 4)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/properties</div>
+                  <div class="endpoint-desc">Add new property (Agent only)</div>
+                  <div class="params"><strong>Body:</strong> { title, location, image, priceRange, description, agentEmail }</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method put">PUT</span>
+                  <div class="endpoint-url">/properties/:id</div>
+                  <div class="endpoint-desc">Update property (Agent/Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/properties/verify/:id</div>
+                  <div class="endpoint-desc">Verify property (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/properties/reject/:id</div>
+                  <div class="endpoint-desc">Reject property (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/properties/advertise/:id</div>
+                  <div class="endpoint-desc">Mark property as advertised (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method delete">DELETE</span>
+                  <div class="endpoint-url">/properties/:id</div>
+                  <div class="endpoint-desc">Delete property (Agent/Admin only)</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">❤️ Wishlist Management</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/wishlist/:email</div>
+                  <div class="endpoint-desc">Get user's wishlist properties</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/wishlist</div>
+                  <div class="endpoint-desc">Add property to wishlist</div>
+                  <div class="params"><strong>Body:</strong> { userEmail, propertyId }</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method delete">DELETE</span>
+                  <div class="endpoint-url">/wishlist/:id</div>
+                  <div class="endpoint-desc">Remove property from wishlist</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">💰 Offer Management</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/offers</div>
+                  <div class="endpoint-desc">Get all offers (Admin only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/offers/user/:email</div>
+                  <div class="endpoint-desc">Get offers by user email</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/offers/agent/:email</div>
+                  <div class="endpoint-desc">Get offers for agent's properties</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/offers</div>
+                  <div class="endpoint-desc">Make offer on property</div>
+                  <div class="params"><strong>Body:</strong> { propertyId, buyerEmail, agentEmail, offeredAmount }</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/offers/accept/:id</div>
+                  <div class="endpoint-desc">Accept offer (Agent only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/offers/reject/:id</div>
+                  <div class="endpoint-desc">Reject offer (Agent only)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method patch">PATCH</span>
+                  <div class="endpoint-url">/offers/bought/:id</div>
+                  <div class="endpoint-desc">Mark offer as bought</div>
+                  <div class="params"><strong>Body:</strong> { transactionId }</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">⭐ Review Management</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/reviews</div>
+                  <div class="endpoint-desc">Get latest reviews (limit 3)</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/reviews/property/:id</div>
+                  <div class="endpoint-desc">Get reviews for specific property</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method get">GET</span>
+                  <div class="endpoint-url">/reviews/user/:email</div>
+                  <div class="endpoint-desc">Get reviews by user</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/reviews</div>
+                  <div class="endpoint-desc">Add new review</div>
+                  <div class="params"><strong>Body:</strong> { propertyId, reviewerEmail, rating, comment }</div>
+                </div>
+                <div class="endpoint">
+                  <span class="method delete">DELETE</span>
+                  <div class="endpoint-url">/reviews/:id</div>
+                  <div class="endpoint-desc">Delete review</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="api-section">
+              <div class="api-header">💳 Payment Integration</div>
+              <div class="api-content">
+                <div class="endpoint">
+                  <span class="method post">POST</span>
+                  <div class="endpoint-url">/create-payment-intent</div>
+                  <div class="endpoint-desc">Create payment intent for property purchase</div>
+                  <div class="params"><strong>Body:</strong> { amount } - Amount in cents</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="footer">
+              <p>🏠 <strong>Real Estate Platform API</strong> - Built with Express.js, MongoDB & Firebase Auth</p>
+              <p>📧 Contact: <strong>shakil880@gmail.com</strong> | 🌐 Frontend: <a href="https://b11a12elite.netlify.app" target="_blank">b11a12elite.netlify.app</a></p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      res.send(html);
+    });
+
+    // Fix property status fields (one-time migration endpoint)
+    app.get('/fix-properties', async (req, res) => {
+      try {
+        // Update properties that have verificationStatus but no status field
+        const result = await propertiesCollection.updateMany(
+          { verificationStatus: { $exists: true }, status: { $exists: false } },
+          [
+            {
+              $set: {
+                status: "$verificationStatus"
+              }
+            },
+            {
+              $unset: "verificationStatus"
+            }
+          ]
+        );
+        
+        res.json({ 
+          message: 'Property status fields fixed', 
+          modifiedCount: result.modifiedCount 
+        });
+      } catch (error) {
+        console.error('Error fixing properties:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // API Documentation Route (JSON format)
+    app.get('/api', (req, res) => {
       const apiDocumentation = {
-        message: "🏠 Welcome to Real Estate Platform API",
+        message: "🏠 Real Estate Platform API",
         version: "1.0.0",
         status: "Running Successfully",
         database: "Connected to MongoDB",
-        documentation: {
+        baseUrl: "http://localhost:5000",
+        frontendUrl: "https://b11a12elite.netlify.app",
+        endpoints: {
           "Authentication": {
-            "POST /jwt": "Generate JWT token",
-            "Description": "Send user object to get JWT token for authentication"
+            "POST /jwt": {
+              description: "Generate JWT token for user authentication",
+              body: "{ user: Object } - User data from Firebase",
+              response: "{ token: String }"
+            }
           },
           "User Management": {
-            "GET /users": "Get all users (Admin only)",
-            "POST /users": "Create or update user",
-            "GET /users/:email": "Get user by email",
-            "PATCH /users/:id": "Update user role (Admin only)",
-            "DELETE /users/:id": "Delete user (Admin only)"
+            "GET /users": {
+              description: "Get all users (Admin only)",
+              auth: "Required - Admin",
+              response: "Array of user objects"
+            },
+            "POST /users": {
+              description: "Create or update user profile",
+              body: "{ uid, email, name, photoURL, role }",
+              response: "{ success: Boolean, user: Object }"
+            },
+            "GET /users/:email": {
+              description: "Get user details by email",
+              auth: "Required",
+              params: "email - User email address",
+              response: "User object"
+            },
+            "PATCH /users/admin/:id": {
+              description: "Make user admin (Admin only)",
+              auth: "Required - Admin",
+              params: "id - User ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /users/agent/:id": {
+              description: "Make user agent (Admin only)",
+              auth: "Required - Admin",
+              params: "id - User ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /users/fraud/:id": {
+              description: "Mark user as fraud (Admin only)",
+              auth: "Required - Admin",
+              params: "id - User ID",
+              response: "{ success: Boolean }"
+            },
+            "DELETE /users/:id": {
+              description: "Delete user (Admin only)",
+              auth: "Required - Admin",
+              params: "id - User ID",
+              response: "{ success: Boolean }"
+            }
           },
           "Property Management": {
-            "GET /properties": "Get all verified properties",
-            "GET /properties/:id": "Get property by ID",
-            "POST /properties": "Add new property (Agent only)",
-            "PUT /properties/:id": "Update property (Agent/Admin)",
-            "DELETE /properties/:id": "Delete property (Agent/Admin)",
-            "PATCH /properties/:id/verify": "Verify property (Admin only)",
-            "GET /properties/agent/:email": "Get properties by agent email"
+            "GET /properties": {
+              description: "Get all verified properties with filters",
+              query: "search, sort, minPrice, maxPrice, page, limit",
+              response: "Array of property objects"
+            },
+            "GET /properties/:id": {
+              description: "Get property details by ID",
+              params: "id - Property ID",
+              response: "Property object"
+            },
+            "GET /properties/agent/:email": {
+              description: "Get properties by agent email",
+              auth: "Required",
+              params: "email - Agent email",
+              response: "Array of property objects"
+            },
+            "GET /advertised-properties": {
+              description: "Get featured/advertised properties (limit 4)",
+              response: "Array of advertised property objects"
+            },
+            "POST /properties": {
+              description: "Add new property (Agent only)",
+              auth: "Required - Agent",
+              body: "{ title, location, image, priceRange, description, agentEmail }",
+              response: "{ success: Boolean, property: Object }"
+            },
+            "PUT /properties/:id": {
+              description: "Update property (Agent/Admin only)",
+              auth: "Required - Agent/Admin",
+              params: "id - Property ID",
+              body: "Property update object",
+              response: "{ success: Boolean, property: Object }"
+            },
+            "PATCH /properties/verify/:id": {
+              description: "Verify property (Admin only)",
+              auth: "Required - Admin",
+              params: "id - Property ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /properties/reject/:id": {
+              description: "Reject property (Admin only)",
+              auth: "Required - Admin",
+              params: "id - Property ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /properties/advertise/:id": {
+              description: "Mark property as advertised (Admin only)",
+              auth: "Required - Admin",
+              params: "id - Property ID",
+              response: "{ success: Boolean }"
+            },
+            "DELETE /properties/:id": {
+              description: "Delete property (Agent/Admin only)",
+              auth: "Required - Agent/Admin",
+              params: "id - Property ID",
+              response: "{ success: Boolean }"
+            }
           },
           "Wishlist Management": {
-            "GET /wishlist/:email": "Get user's wishlist",
-            "POST /wishlist": "Add property to wishlist",
-            "DELETE /wishlist/:id": "Remove from wishlist"
+            "GET /wishlist/:email": {
+              description: "Get user's wishlist properties",
+              params: "email - User email",
+              response: "Array of wishlist property objects"
+            },
+            "POST /wishlist": {
+              description: "Add property to wishlist",
+              body: "{ userEmail, propertyId }",
+              response: "{ success: Boolean, wishlist: Object }"
+            },
+            "DELETE /wishlist/:id": {
+              description: "Remove property from wishlist",
+              params: "id - Wishlist item ID",
+              response: "{ success: Boolean }"
+            }
           },
           "Offer Management": {
-            "GET /offers": "Get all offers (Admin only)",
-            "GET /offers/buyer/:email": "Get offers by buyer email",
-            "GET /offers/agent/:email": "Get offers for agent properties",
-            "POST /offers": "Make an offer on property",
-            "PATCH /offers/:id/accept": "Accept offer (Agent only)",
-            "PATCH /offers/:id/reject": "Reject offer (Agent only)"
+            "GET /offers": {
+              description: "Get all offers (Admin only)",
+              auth: "Required - Admin",
+              response: "Array of offer objects"
+            },
+            "GET /offers/user/:email": {
+              description: "Get offers by user email",
+              params: "email - User email",
+              response: "Array of user's offer objects"
+            },
+            "GET /offers/agent/:email": {
+              description: "Get offers for agent's properties",
+              params: "email - Agent email",
+              response: "Array of offer objects for agent"
+            },
+            "POST /offers": {
+              description: "Make offer on property",
+              body: "{ propertyId, buyerEmail, agentEmail, offeredAmount }",
+              response: "{ success: Boolean, offer: Object }"
+            },
+            "PATCH /offers/accept/:id": {
+              description: "Accept offer (Agent only)",
+              auth: "Required - Agent",
+              params: "id - Offer ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /offers/reject/:id": {
+              description: "Reject offer (Agent only)",
+              auth: "Required - Agent",
+              params: "id - Offer ID",
+              response: "{ success: Boolean }"
+            },
+            "PATCH /offers/bought/:id": {
+              description: "Mark offer as bought",
+              params: "id - Offer ID",
+              body: "{ transactionId }",
+              response: "{ success: Boolean }"
+            }
           },
           "Review Management": {
-            "GET /reviews": "Get all reviews",
-            "GET /reviews/property/:id": "Get reviews for property",
-            "GET /reviews/user/:email": "Get reviews by user",
-            "POST /reviews": "Add new review",
-            "DELETE /reviews/:id": "Delete review (Admin/Owner)"
+            "GET /reviews": {
+              description: "Get latest reviews (limit 3)",
+              response: "Array of review objects"
+            },
+            "GET /reviews/property/:id": {
+              description: "Get reviews for specific property",
+              params: "id - Property ID",
+              response: "Array of review objects"
+            },
+            "GET /reviews/user/:email": {
+              description: "Get reviews by user",
+              params: "email - User email",
+              response: "Array of user's review objects"
+            },
+            "POST /reviews": {
+              description: "Add new review",
+              body: "{ propertyId, reviewerEmail, rating, comment }",
+              response: "{ success: Boolean, review: Object }"
+            },
+            "DELETE /reviews/:id": {
+              description: "Delete review",
+              params: "id - Review ID",
+              response: "{ success: Boolean }"
+            }
           },
-          "Payment Management": {
-            "POST /create-payment-intent": "Create Stripe payment intent",
-            "POST /payments": "Process successful payment",
-            "GET /payments/buyer/:email": "Get buyer's purchase history"
+          "Payment Integration": {
+            "POST /create-payment-intent": {
+              description: "Create payment intent for property purchase",
+              body: "{ amount } - Amount in cents",
+              response: "{ clientSecret: String }"
+            }
           }
         },
         "Environment": process.env.NODE_ENV || "development",
         "Port": process.env.PORT || 5000,
-        "Timestamp": new Date().toISOString()
+        "Timestamp": new Date().toISOString(),
+        "Note": "For detailed interactive documentation, visit http://localhost:5000"
       };
       
       res.json(apiDocumentation);
@@ -128,6 +644,145 @@ async function run() {
         timestamp: new Date().toISOString(),
         database: 'Connected'
       });
+    });
+
+    // Seed Sample Data (for testing)
+    app.post('/seed-data', async (req, res) => {
+      try {
+        // Check if data already exists
+        const existingProperties = await propertiesCollection.countDocuments();
+        if (existingProperties > 0) {
+          return res.json({ message: 'Data already exists', count: existingProperties });
+        }
+
+        // Sample properties
+        const sampleProperties = [
+          {
+            title: "Modern Family Home",
+            location: "Downtown, New York",
+            image: "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=800",
+            priceRange: "$300,000 - $400,000",
+            description: "Beautiful modern family home with 3 bedrooms and 2 bathrooms. Perfect for a growing family.",
+            agentName: "John Smith",
+            agentEmail: "john@example.com",
+            agentImage: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
+            status: "verified",
+            advertised: true,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          },
+          {
+            title: "Luxury Apartment",
+            location: "Manhattan, New York",
+            image: "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800",
+            priceRange: "$500,000 - $700,000",
+            description: "Luxurious apartment in the heart of Manhattan with stunning city views.",
+            agentName: "Sarah Johnson",
+            agentEmail: "sarah@example.com",
+            agentImage: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150",
+            status: "verified",
+            advertised: false,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          },
+          {
+            title: "Cozy Suburban House",
+            location: "Queens, New York",
+            image: "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800",
+            priceRange: "$250,000 - $350,000",
+            description: "Charming suburban house with a beautiful garden and quiet neighborhood.",
+            agentName: "Mike Davis",
+            agentEmail: "mike@example.com",
+            agentImage: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150",
+            status: "verified",
+            advertised: true,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          },
+          {
+            title: "Pending Property",
+            location: "Brooklyn, New York",
+            image: "https://images.unsplash.com/photo-1582407947304-fd86f028f716?w=800",
+            priceRange: "$200,000 - $300,000",
+            description: "This property is still pending verification.",
+            agentName: "Lisa Brown",
+            agentEmail: "lisa@example.com",
+            agentImage: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150",
+            status: "pending",
+            advertised: false,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
+        ];
+
+        // Insert sample properties
+        const propertiesResult = await propertiesCollection.insertMany(sampleProperties);
+        
+        // Sample users
+        const sampleUsers = [
+          {
+            uid: "admin-uid-1",
+            email: "admin@example.com",
+            name: "Admin User",
+            photoURL: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150",
+            role: "admin",
+            createdAt: new Date()
+          },
+          {
+            uid: "agent-uid-1",
+            email: "john@example.com",
+            name: "John Smith",
+            photoURL: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
+            role: "agent",
+            createdAt: new Date()
+          },
+          {
+            uid: "user-uid-1",
+            email: "user@example.com",
+            name: "Regular User",
+            photoURL: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150",
+            role: "user",
+            createdAt: new Date()
+          }
+        ];
+
+        // Insert sample users
+        const usersResult = await usersCollection.insertMany(sampleUsers);
+
+        res.json({
+          message: 'Sample data created successfully',
+          properties: propertiesResult.insertedCount,
+          users: usersResult.insertedCount
+        });
+      } catch (error) {
+        console.error('Error seeding data:', error);
+        res.status(500).json({ message: 'Error seeding data', error: error.message });
+      }
+    });
+
+    // Clear all data (for testing)
+    app.delete('/clear-data', async (req, res) => {
+      try {
+        const propertiesDeleted = await propertiesCollection.deleteMany({});
+        const usersDeleted = await usersCollection.deleteMany({});
+        const wishlistDeleted = await wishlistCollection.deleteMany({});
+        const offersDeleted = await offersCollection.deleteMany({});
+        const reviewsDeleted = await reviewsCollection.deleteMany({});
+
+        res.json({
+          message: 'All data cleared successfully',
+          deleted: {
+            properties: propertiesDeleted.deletedCount,
+            users: usersDeleted.deletedCount,
+            wishlist: wishlistDeleted.deletedCount,
+            offers: offersDeleted.deletedCount,
+            reviews: reviewsDeleted.deletedCount
+          }
+        });
+      } catch (error) {
+        console.error('Error clearing data:', error);
+        res.status(500).json({ message: 'Error clearing data', error: error.message });
+      }
     });
 
     // JWT token generation
@@ -144,9 +799,19 @@ async function run() {
     });
 
     app.get('/users/:email', verifyToken, async (req, res) => {
-      const email = req.params.email;
-      const user = await usersCollection.findOne({ email: email });
-      res.send(user);
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne({ email: email });
+        
+        if (!user) {
+          return res.status(404).json({ error: 'User not found' });
+        }
+        
+        res.send(user);
+      } catch (error) {
+        console.error('Error fetching user:', error);
+        res.status(500).json({ error: 'Failed to fetch user' });
+      }
     });
 
     app.post('/users', async (req, res) => {
@@ -163,87 +828,215 @@ async function run() {
     });
 
     app.patch('/users/admin/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          role: 'admin'
-        },
-      };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid user ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            role: 'admin'
+          },
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating user to admin:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      }
     });
 
     app.patch('/users/agent/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          role: 'agent'
-        },
-      };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid user ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            role: 'agent'
+          },
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating user to agent:', error);
+        res.status(500).json({ error: 'Failed to update user role' });
+      }
     });
 
     app.patch('/users/fraud/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          role: 'fraud'
-        },
-      };
-      const result = await usersCollection.updateOne(filter, updateDoc);
-      
-      // Remove all properties by this agent from verified properties
-      await propertiesCollection.updateMany(
-        { agentEmail: req.body.email },
-        { $set: { verificationStatus: 'rejected' } }
-      );
-      
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid user ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            role: 'fraud'
+          },
+        };
+        const result = await usersCollection.updateOne(filter, updateDoc);
+        
+        // Remove all properties by this agent from verified properties
+        await propertiesCollection.updateMany(
+          { agentEmail: req.body.email },
+          { $set: { verificationStatus: 'rejected' } }
+        );
+        
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating user to fraud:', error);
+        res.status(500).json({ error: 'Failed to update user role' });
+      }
     });
 
     app.delete('/users/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await usersCollection.deleteOne(query);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid user ID format' });
+        }
+        
+        const query = { _id: new ObjectId(id) };
+        const result = await usersCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: 'Failed to delete user' });
+      }
     });
 
     // Property Management APIs
     app.get('/properties', async (req, res) => {
-      const { search, sort, minPrice, maxPrice } = req.query;
-      let query = { verificationStatus: 'verified' };
-      
-      if (search) {
-        query.location = { $regex: search, $options: 'i' };
+      try {
+        const { search, sort, minPrice, maxPrice, admin, status } = req.query;
+        
+        // Build status filter based on permissions and request
+        let query = {};
+        if (admin === 'true') {
+          // Admin can see all properties or filter by specific status
+          if (status && status !== 'all') {
+            query.status = status;
+          }
+          // If status is 'all' or not provided, don't add status filter
+        } else {
+          // Regular users: handle different status requests
+          if (status === 'pending') {
+            query.status = 'pending';
+          } else if (status === 'verified') {
+            query.status = 'verified';
+          } else if (status === 'all') {
+            // Don't add status filter - show all properties
+          } else if (!status) {
+            // No status parameter means show all properties (for "All Properties" filter)
+            // Don't add status filter
+          } else {
+            // Any other specific status requested
+            query.status = status;
+          }
+        }
+        
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: 'i' } },
+            { location: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } }
+          ];
+        }
+        
+        if (minPrice || maxPrice) {
+          // For price filtering, we'll parse the priceRange string
+          const priceFilter = {};
+          if (minPrice) priceFilter.$gte = parseInt(minPrice);
+          if (maxPrice) priceFilter.$lte = parseInt(maxPrice);
+          // This is a simplified approach - in production you'd want better price parsing
+        }
+        
+        let result = propertiesCollection.find(query);
+        
+        // Apply initial database sorting for non-price sorts
+        if (sort === 'newest' || !sort) {
+          result = result.sort({ createdAt: -1 });
+        } else if (sort === 'oldest') {
+          result = result.sort({ createdAt: 1 });
+        } else {
+          // For price sorts, get all data first then sort in JavaScript
+          result = result.sort({ createdAt: -1 }); // Default order first
+        }
+        
+        let properties = await result.toArray();
+        console.log(`Fetched ${properties.length} properties, sorting by: ${sort || 'default (newest)'}`);
+        console.log(`Status filter applied: ${status || 'none'}, Query: ${JSON.stringify(query)}`);
+        
+        // For price sorting, we need to sort by extracted numeric values since priceRange is a string
+        if (sort === 'price-asc' || sort === 'price-desc') {
+          properties = properties.sort((a, b) => {
+            const getPriceFromRange = (priceRange) => {
+              if (!priceRange) return 0;
+              // Extract first number from strings like "$300,000 - $400,000", "300000-400000", "300,000 - 400,000"
+              const match = priceRange.match(/\$?([\d,]+)/);
+              return match ? parseInt(match[1].replace(/,/g, '')) : 0;
+            };
+            
+            const priceA = getPriceFromRange(a.priceRange);
+            const priceB = getPriceFromRange(b.priceRange);
+            
+            if (sort === 'price-asc') {
+              return priceA - priceB;
+            } else {
+              return priceB - priceA;
+            }
+          });
+          
+          console.log(`Price sorting applied: ${sort}, first property price: ${properties[0]?.priceRange}, last property price: ${properties[properties.length - 1]?.priceRange}`);
+        }
+        
+        // Return data in expected format for frontend
+        res.json({
+          properties: properties,
+          total: properties.length,
+          page: parseInt(req.query.page) || 1,
+          limit: parseInt(req.query.limit) || 12,
+          totalPages: Math.ceil(properties.length / (parseInt(req.query.limit) || 12))
+        });
+      } catch (error) {
+        console.error('Error fetching properties:', error);
+        res.status(500).json({ message: 'Error fetching properties', error: error.message });
       }
-      
-      if (minPrice || maxPrice) {
-        query.priceRange = {};
-        if (minPrice) query.priceRange.min = { $gte: parseInt(minPrice) };
-        if (maxPrice) query.priceRange.max = { $lte: parseInt(maxPrice) };
-      }
-      
-      let result = propertiesCollection.find(query);
-      
-      if (sort === 'price-asc') {
-        result = result.sort({ 'priceRange.min': 1 });
-      } else if (sort === 'price-desc') {
-        result = result.sort({ 'priceRange.max': -1 });
-      }
-      
-      const properties = await result.toArray();
-      res.send(properties);
     });
 
     app.get('/properties/:id', async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await propertiesCollection.findOne(query);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        // Validate ObjectId
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
+        }
+        
+        const query = { _id: new ObjectId(id) };
+        const result = await propertiesCollection.findOne(query);
+        
+        if (!result) {
+          return res.status(404).json({ error: 'Property not found' });
+        }
+        
+        res.send(result);
+      } catch (error) {
+        console.error('Error fetching property:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      }
     });
 
     app.get('/properties/agent/:email', verifyToken, async (req, res) => {
@@ -262,89 +1055,171 @@ async function run() {
       res.send(soldOffers);
     });
 
-    app.post('/properties', verifyToken, async (req, res) => {
-      const property = req.body;
-      property.verificationStatus = 'pending';
-      property.createdAt = new Date();
-      property.isAdvertised = false;
-      const result = await propertiesCollection.insertOne(property);
-      res.send(result);
+    app.post('/properties', verifyToken, verifyAgent, async (req, res) => {
+      try {
+        const property = req.body;
+        property.status = 'pending'; // Use consistent field name
+        property.createdAt = new Date();
+        property.updatedAt = new Date();
+        property.advertised = false;
+        const result = await propertiesCollection.insertOne(property);
+        
+        res.status(201).json({
+          success: true,
+          message: 'Property added successfully',
+          propertyId: result.insertedId
+        });
+      } catch (error) {
+        console.error('Error adding property:', error);
+        res.status(500).json({
+          error: true,
+          message: 'Failed to add property'
+        });
+      }
     });
 
     app.put('/properties/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const options = { upsert: true };
-      const updatedProperty = req.body;
-      const property = {
-        $set: {
-          title: updatedProperty.title,
-          location: updatedProperty.location,
-          image: updatedProperty.image,
-          priceRange: updatedProperty.priceRange,
-          description: updatedProperty.description
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
         }
-      };
-      const result = await propertiesCollection.updateOne(filter, property, options);
-      res.send(result);
+        
+        const filter = { _id: new ObjectId(id) };
+        const options = { upsert: true };
+        const updatedProperty = req.body;
+        const property = {
+          $set: {
+            title: updatedProperty.title,
+            location: updatedProperty.location,
+            image: updatedProperty.image,
+            priceRange: updatedProperty.priceRange,
+            description: updatedProperty.description
+          }
+        };
+        const result = await propertiesCollection.updateOne(filter, property, options);
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating property:', error);
+        res.status(500).json({ error: 'Failed to update property' });
+      }
     });
 
     app.patch('/properties/verify/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          verificationStatus: 'verified'
-        },
-      };
-      const result = await propertiesCollection.updateOne(filter, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            status: 'verified',
+            updatedAt: new Date()
+          },
+        };
+        const result = await propertiesCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error verifying property:', error);
+        res.status(500).json({ error: 'Failed to verify property' });
+      }
     });
 
     app.patch('/properties/reject/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          verificationStatus: 'rejected'
-        },
-      };
-      const result = await propertiesCollection.updateOne(filter, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            status: 'rejected',
+            updatedAt: new Date()
+          },
+        };
+        const result = await propertiesCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error rejecting property:', error);
+        res.status(500).json({ error: 'Failed to reject property' });
+      }
     });
 
     app.patch('/properties/advertise/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          isAdvertised: true
-        },
-      };
-      const result = await propertiesCollection.updateOne(filter, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
+        }
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: {
+            advertised: true,
+            updatedAt: new Date()
+          },
+        };
+        const result = await propertiesCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error advertising property:', error);
+        res.status(500).json({ error: 'Failed to advertise property' });
+      }
     });
 
     app.get('/advertised-properties', async (req, res) => {
-      const query = { verificationStatus: 'verified', isAdvertised: true };
-      const result = await propertiesCollection.find(query).limit(4).toArray();
-      res.send(result);
+      try {
+        const query = { status: 'verified', advertised: true };
+        const result = await propertiesCollection.find(query).limit(4).toArray();
+        res.json(result);
+      } catch (error) {
+        console.error('Error fetching advertised properties:', error);
+        res.status(500).json({ message: 'Error fetching advertised properties', error: error.message });
+      }
     });
 
     app.delete('/properties/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await propertiesCollection.deleteOne(query);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid property ID format' });
+        }
+        
+        const query = { _id: new ObjectId(id) };
+        const result = await propertiesCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error('Error deleting property:', error);
+        res.status(500).json({ error: 'Failed to delete property' });
+      }
     });
 
     // Wishlist APIs
     app.get('/wishlist/:email', verifyToken, async (req, res) => {
-      const email = req.params.email;
-      const wishlistItems = await wishlistCollection.find({ userEmail: email }).toArray();
-      const propertyIds = wishlistItems.map(item => new ObjectId(item.propertyId));
-      const properties = await propertiesCollection.find({ _id: { $in: propertyIds } }).toArray();
-      res.send(properties);
+      try {
+        const email = req.params.email;
+        const wishlistItems = await wishlistCollection.find({ userEmail: email }).toArray();
+        
+        // Filter and validate property IDs
+        const validPropertyIds = wishlistItems
+          .filter(item => isValidObjectId(item.propertyId))
+          .map(item => new ObjectId(item.propertyId));
+        
+        const properties = await propertiesCollection.find({ _id: { $in: validPropertyIds } }).toArray();
+        res.send(properties);
+      } catch (error) {
+        console.error('Error fetching wishlist:', error);
+        res.status(500).json({ error: 'Failed to fetch wishlist' });
+      }
     });
 
     app.post('/wishlist', verifyToken, async (req, res) => {
@@ -389,49 +1264,83 @@ async function run() {
     });
 
     app.patch('/offers/accept/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
-      
-      // Accept this offer
-      await offersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: 'accepted' } }
-      );
-      
-      // Reject all other offers for the same property
-      await offersCollection.updateMany(
-        { 
-          propertyId: offer.propertyId,
-          _id: { $ne: new ObjectId(id) }
-        },
-        { $set: { status: 'rejected' } }
-      );
-      
-      res.send({ message: 'Offer accepted successfully' });
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid offer ID format' });
+        }
+        
+        const offer = await offersCollection.findOne({ _id: new ObjectId(id) });
+        
+        if (!offer) {
+          return res.status(404).json({ error: 'Offer not found' });
+        }
+        
+        // Accept this offer
+        await offersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: 'accepted' } }
+        );
+        
+        // Reject all other offers for the same property
+        await offersCollection.updateMany(
+          { 
+            propertyId: offer.propertyId,
+            _id: { $ne: new ObjectId(id) }
+          },
+          { $set: { status: 'rejected' } }
+        );
+        
+        res.send({ message: 'Offer accepted successfully' });
+      } catch (error) {
+        console.error('Error accepting offer:', error);
+        res.status(500).json({ error: 'Failed to accept offer' });
+      }
     });
 
     app.patch('/offers/reject/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const updateDoc = {
-        $set: {
-          status: 'rejected'
-        },
-      };
-      const result = await offersCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid offer ID format' });
+        }
+        
+        const updateDoc = {
+          $set: {
+            status: 'rejected'
+          },
+        };
+        const result = await offersCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error rejecting offer:', error);
+        res.status(500).json({ error: 'Failed to reject offer' });
+      }
     });
 
     app.patch('/offers/bought/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const updateDoc = {
-        $set: {
-          status: 'bought',
-          transactionId: req.body.transactionId,
-          paymentDate: new Date()
-        },
-      };
-      const result = await offersCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid offer ID format' });
+        }
+        
+        const updateDoc = {
+          $set: {
+            status: 'bought',
+            transactionId: req.body.transactionId,
+            paymentDate: new Date()
+          },
+        };
+        const result = await offersCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
+        res.send(result);
+      } catch (error) {
+        console.error('Error updating offer to bought:', error);
+        res.status(500).json({ error: 'Failed to update offer status' });
+      }
     });
 
     // Reviews APIs
@@ -460,10 +1369,20 @@ async function run() {
     });
 
     app.delete('/reviews/:id', verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await reviewsCollection.deleteOne(query);
-      res.send(result);
+      try {
+        const id = req.params.id;
+        
+        if (!isValidObjectId(id)) {
+          return res.status(400).json({ error: 'Invalid review ID format' });
+        }
+        
+        const query = { _id: new ObjectId(id) };
+        const result = await reviewsCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        console.error('Error deleting review:', error);
+        res.status(500).json({ error: 'Failed to delete review' });
+      }
     });
 
     // Payment API (Stripe integration would go here)
