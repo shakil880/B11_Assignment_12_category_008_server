@@ -1411,10 +1411,6 @@ async function run() {
       res.send(result);
     });
 
-    app.get('/', (req, res) => {
-      res.send('Real Estate Server is running!');
-    });
-
     console.log("Successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
@@ -1424,6 +1420,12 @@ async function run() {
 
 run().catch(console.dir);
 
-app.listen(port, () => {
-  console.log(`Real Estate server is running on port ${port}`);
-});
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(port, () => {
+    console.log(`Real Estate server is running on port ${port}`);
+  });
+}
+
+// Export for Vercel
+module.exports = app;
