@@ -50,6 +50,28 @@ const client = new MongoClient(uri, {
   }
 });
 
+// Health check and keep-alive endpoints
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    message: 'Server is running smoothly'
+  });
+});
+
+app.get('/ping', (req, res) => {
+  res.status(200).json({ message: 'pong', timestamp: Date.now() });
+});
+
+app.get('/keep-alive', (req, res) => {
+  res.status(200).json({
+    alive: true,
+    timestamp: new Date().toISOString(),
+    message: 'Server kept alive'
+  });
+});
+
 // Simple authentication middleware that checks user email
 const createVerifyUser = (usersCollection) => {
   return async (req, res, next) => {
@@ -1559,6 +1581,22 @@ async function run() {
     });
 
     console.log("Successfully connected to MongoDB!");
+    
+    // Keep-alive mechanism for Vercel
+    if (process.env.NODE_ENV === 'production') {
+      console.log('Setting up keep-alive mechanism for production...');
+      // Self-ping every 14 minutes to prevent cold starts
+      setInterval(async () => {
+        try {
+          console.log('Keep-alive ping at:', new Date().toISOString());
+          // You can add a simple database ping here too
+          await db.admin().ping();
+          console.log('Database ping successful');
+        } catch (error) {
+          console.error('Keep-alive ping failed:', error);
+        }
+      }, 14 * 60 * 1000); // 14 minutes
+    }
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
