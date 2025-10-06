@@ -1,6 +1,9 @@
 ## 🚀 Live Site
 
 - **Live Site (Frontend)**: https://b11a12elite.netlify.app
+- **Admin Username**: test@test.com
+- **Admin Password**: test1234
+
 - **Backend Site (API)**: https://b11-assignment-12-category-008-serv.vercel.app
 
 
