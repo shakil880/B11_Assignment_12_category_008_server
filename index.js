@@ -1111,10 +1111,22 @@ async function run() {
       try {
         console.log('Adding property request received');
         console.log('User from token:', req.decoded);
+        console.log('User details:', req.user);
         console.log('Request body:', req.body);
         
         const property = req.body;
-        property.status = 'pending'; // Use consistent field name
+        
+        // Auto-verify properties posted by admins, others remain pending
+        if (req.user && req.user.role === 'admin') {
+          property.status = 'verified'; // Admin properties are auto-verified
+          property.verifiedBy = req.user.email;
+          property.verifiedAt = new Date();
+          console.log('Admin user detected - property auto-verified');
+        } else {
+          property.status = 'pending'; // Regular agent properties need admin approval
+          console.log('Agent user detected - property set to pending for admin review');
+        }
+        
         property.createdAt = new Date();
         property.updatedAt = new Date();
         property.advertised = false;
@@ -1130,10 +1142,15 @@ async function run() {
         
         console.log('Property inserted successfully:', result.insertedId);
         
+        const responseMessage = req.user && req.user.role === 'admin' 
+          ? 'Property added and automatically verified (admin privilege)'
+          : 'Property added successfully and is pending admin approval';
+
         res.status(201).json({
           success: true,
-          message: 'Property added successfully',
-          propertyId: result.insertedId
+          message: responseMessage,
+          propertyId: result.insertedId,
+          status: property.status
         });
       } catch (error) {
         console.error('Detailed error adding property:', error);
